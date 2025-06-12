@@ -1,0 +1,11 @@
+# wp-saas/traefik/traefik.yml
+entryPoints:
+  web:
+    address: ":80"
+
+providers:
+  docker:
+    exposedByDefault: false
+
+api:
+  dashboard: true
