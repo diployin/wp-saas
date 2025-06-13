@@ -1,11 +1,21 @@
-# wp-saas/traefik/traefik.yml
 entryPoints:
   web:
     address: ":80"
+  websecure:
+    address: ":443"
 
 providers:
   docker:
     exposedByDefault: false
 
+certificatesResolvers:
+  letsencrypt:
+    acme:
+      email: diployindia@gmail.com      # Change this too
+      storage: acme.json
+      httpChallenge:
+        entryPoint: web
+
 api:
   dashboard: true
+  insecure: true

@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>wp-saas Deployment Guide</title>
+<style>
+  body { font-family: Arial, sans-serif; margin: 2rem; line-height: 1.6; max-width: 900px; }
+  h1, h2, h3 { color: #2c3e50; }
+  pre { background: #f4f4f4; padding: 1rem; overflow-x: auto; }
+  code { background: #eee; padding: 0.2rem 0.4rem; border-radius: 3px; }
+  ul { margin-left: 1.5rem; }
+</style>
+</head>
+<body>
+
+<h1>wp-saas Deployment Guide for DigitalOcean with SSL & Traefik</h1>
+
+<p>This guide helps you set up your wp-saas Laravel backend, Dockerized WordPress instant sites, Traefik reverse proxy with automatic Let's Encrypt SSL, and wildcard subdomains for your domain <code>wpsaas.in</code>.</p>
+
+<h2>Prerequisites</h2>
+<ul>
+  <li>DigitalOcean Droplet (Ubuntu 22.04 LTS recommended, 2GB+ RAM)</li>
+  <li>Domain with DNS control (e.g., <code>wpsaas.in</code>)</li>
+  <li>SSH access to the droplet</li>
+  <li>Docker and Docker Compose installed</li>
+</ul>
+
+<h2>Step 1: Prepare your Droplet</h2>
+<pre><code>ssh root@&lt;droplet-ip&gt;
+
+apt update &amp;&amp; apt upgrade -y
+
+apt install -y docker.io docker-compose git curl unzip \
+php8.3-cli php8.3-common php8.3-mbstring php8.3-xml php8.3-bcmath \
+php8.3-curl php8.3-mysql php8.3-zip php8.3-tokenizer
+
+curl -sS https://getcomposer.org/installer | php
+mv composer.phar /usr/local/bin/composer
+
+docker network create wp-saas-net
+</code></pre>
+
+<h2>Step 2: Clone wp-saas project</h2>
+<pre><code>cd /opt
+git clone &lt;your-git-repo-url&gt; wp-saas
+cd wp-saas
+</code></pre>
+
+<h2>Step 3: Configure Traefik</h2>
+
+<h3>3.1 Edit <code>traefik/traefik.yml</code>:</h3>
+<pre><code>entryPoints:
+  web:
+    address: ":80"
+  websecure:
+    address: ":443"
+
+providers:
+  docker:
+    exposedByDefault: false
+
+certificatesResolvers:
+  letsencrypt:
+    acme:
+      email: your-email@domain.com   # Replace with your email
+      storage: acme.json
+      httpChallenge:
+        entryPoint: web
+
+api:
+  dashboard: true
+</code></pre>
+
+<h3>3.2 Edit <code>traefik/docker-compose.yml</code>:</h3>
+<pre><code>version: "3"
+
+services:
+  traefik:
+    image: traefik:v2.10
+    command:
+      - "--api.dashboard=true"
+      - "--providers.docker=true"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+      - "--certificatesresolvers.letsencrypt.acme.httpchallenge=true"
+      - "--certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web"
+      - "--certificatesresolvers.letsencrypt.acme.email=your-email@domain.com"
+      - "--certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json"
+      - "--log.level=INFO"
+    ports:
+      - "80:80"
+      - "443:443"
+      - "8080:8080"
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock:ro"
+      - "./letsencrypt:/letsencrypt"
+    networks:
+      - wp-saas-net
+    restart: always
+
+networks:
+  wp-saas-net:
+    external: true
+</code></pre>
+
+<h3>3.3 Prepare letsencrypt folder and set permissions:</h3>
+<pre><code>mkdir -p traefik/letsencrypt
+touch traefik/letsencrypt/acme.json
+chmod 600 traefik/letsencrypt/acme.json
+</code></pre>
+
+<h2>Step 4: Start Traefik</h2>
+<pre><code>cd traefik
+docker-compose up -d
+</code></pre>
+
+<p>Check Traefik dashboard at: <code>http://&lt;droplet-ip&gt;:8080/dashboard/</code></p>
+
+<h2>Step 5: Setup Laravel backend</h2>
+<pre><code>cd ../backend
+composer install
+
+# Configure your .env file properly (set APP_URL=https://wpsaas.in and other variables)
+
+php artisan serve --host=0.0.0.0 --port=8000
+</code></pre>
+
+<h2>Step 6: Configure DNS</h2>
+<p>Add the following A records in your DNS management panel:</p>
+<table border="1" cellpadding="5" cellspacing="0">
+  <thead>
+    <tr><th>Host</th><th>Type</th><th>Value</th><th>TTL</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>wpsaas.in</td><td>A</td><td>&lt;droplet-ip&gt;</td><td>300</td></tr>
+    <tr><td>*.wpsaas.in</td><td>A</td><td>&lt;droplet-ip&gt;</td><td>300</td></tr>
+  </tbody>
+</table>
+
+<h2>Step 7: Create WordPress Sites via API</h2>
+<pre><code>curl -X POST http://&lt;droplet-ip&gt;:8000/api/create-guest-site
+</code></pre>
+
+<p>You will get a JSON response with the site URL, login URL, admin username, and password.</p>
+
+<h2>Step 8: Access Created WordPress Sites</h2>
+<ul>
+  <li>Wait about 20-30 seconds for containers and WordPress setup to complete.</li>
+  <li>Open the HTTPS URL returned in the API response in your browser.</li>
+  <li>Login with the provided admin credentials.</li>
+</ul>
+
+<h2>Step 9: Monitor and Maintain</h2>
+<ul>
+  <li>Check running containers: <code>docker ps</code></li>
+  <li>Check Traefik logs: <code>docker logs traefik_traefik_1</code></li>
+  <li>Make sure firewall allows ports 80 and 443:<br />
+    <code>ufw allow 80/tcp</code><br />
+    <code>ufw allow 443/tcp</code></li>
+</ul>
+
+<h2>Optional: Setup Supervisor for Laravel Backend</h2>
+<pre><code>[program:laravel]
+command=php /opt/wp-saas/backend/artisan serve --host=0.0.0.0 --port=8000
+directory=/opt/wp-saas/backend
+autostart=true
+autorestart=true
+stderr_logfile=/var/log/laravel.err.log
+stdout_logfile=/var/log/laravel.out.log
+user=root
+</code></pre>
+
+<p>Reload Supervisor:</p>
+<pre><code>supervisorctl reread
+supervisorctl update
+supervisorctl start laravel
+</code></pre>
+
+<h2>Summary</h2>
+<p>You now have a working environment with:</p>
+<ul>
+  <li>Dockerized Traefik with Let’s Encrypt SSL</li>
+  <li>Docker network for WP &amp; MySQL containers</li>
+  <li>Laravel backend spinning WordPress sites on demand</li>
+  <li>Wildcard SSL for all subdomains of <code>wpsaas.in</code></li>
+  <li>Ready-to-use API endpoint to create instant WordPress sites</li>
+</ul>
+
+</body>
+</html>

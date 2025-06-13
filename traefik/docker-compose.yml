@@ -1,21 +1,29 @@
-# wp-saas/traefik/docker-compose.yml
 version: "3"
 
 services:
   traefik:
     image: traefik:v2.10
     command:
-      - "--api.insecure=true"
+      - "--api.dashboard=true"
+      - "--api.insecure=true"              # Remove or secure this in production
       - "--providers.docker=true"
       - "--entrypoints.web.address=:80"
-      - "--log.level=DEBUG"
+      - "--entrypoints.websecure.address=:443"
+      - "--certificatesresolvers.letsencrypt.acme.httpchallenge=true"
+      - "--certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web"
+      - "--certificatesresolvers.letsencrypt.acme.email=diployindia@gmail.com" # Change this
+      - "--certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json"
+      - "--log.level=INFO"
     ports:
       - "80:80"
-      - "8080:8080" # Traefik dashboard
+      - "443:443"
+      - "8080:8080"
     volumes:
       - "/var/run/docker.sock:/var/run/docker.sock:ro"
+      - "./letsencrypt:/letsencrypt"
     networks:
       - wp-saas-net
+    restart: always
 
 networks:
   wp-saas-net:
